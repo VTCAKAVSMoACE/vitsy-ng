@@ -1,23 +1,97 @@
+use std::cell::RefCell;
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::error::Error;
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
+use std::rc::Rc;
 
+fn enriched_parse(name: String) -> Result<Rc<RefCell<Program>>, Box<dyn Error>> {
+    let mut to_explore = Vec::<String>::new();
+    to_explore.push(name.clone());
+    let mut program_graph = HashMap::new();
+
+    while let Some(target) = to_explore.pop() {
+        match program_graph.entry(target) {
+            Entry::Vacant(k) => {
+                let program = program_parser::program(&File::open(Path::new(k.key())).and_then(
+                    |mut f| {
+                        let mut contents = String::new();
+                        match f.read_to_string(&mut contents) {
+                            Ok(_) => Ok(contents),
+                            Err(e) => Err(e),
+                        }
+                    },
+                )?)?;
+
+                program
+                    .extends
+                    .iter()
+                    .for_each(|e| to_explore.push(e.target.clone()));
+                program
+                    .uses
+                    .iter()
+                    .for_each(|u| to_explore.push(u.target.clone()));
+
+                let ret = Rc::new(RefCell::new(Program {
+                    methods: program.methods,
+                    extends: vec![],
+                    uses: vec![],
+                }));
+
+                let program_node = (
+                    ret,
+                    program
+                        .uses
+                        .iter()
+                        .map(|u| u.target.clone())
+                        .collect::<Vec<String>>(),
+                    program
+                        .extends
+                        .iter()
+                        .map(|e| e.target.clone())
+                        .collect::<Vec<String>>(),
+                );
+                k.insert(program_node);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(program_graph.get(&name).unwrap().0.clone())
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Program {
+    pub methods: Vec<Method>,
+    pub extends: Vec<Box<Program>>,
+    pub uses: Vec<Box<Program>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ParserProgram {
     pub methods: Vec<Method>,
     pub extends: Vec<Extend>,
     pub uses: Vec<Use>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Method {
     pub ops: Vec<Operation>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Extend {
     pub target: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Use {
     pub target: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Operation {
     IfNot,
     If,
@@ -88,18 +162,19 @@ pub enum Operation {
     Write,
     Shell,
     Eval,
+    Value(u8),
 }
 
 peg::parser! {
     grammar program_parser() for str {
         use Operation::*;
 
-        pub rule program() -> Program
-            = methods:(m:method() "\n" { m })+
-              extends:(e:extend_decl() "\n" { e })*
-              uses:(u:use_decl() ** "\n" { u }) "\n"*
+        pub rule program() -> ParserProgram
+            = methods:(m:method() ** "\n" { m })
+              extends:("\n" e:extend_decl() { e })*
+              uses:("\n" u:use_decl() { u })* "\n"*
             {
-                Program {
+                ParserProgram {
                     methods,
                     extends,
                     uses
@@ -188,10 +263,29 @@ peg::parser! {
             / "." { Write }
             / "," { Shell }
             / "n" { Eval }
+            / v:value() { Value(v) }
+
+        rule value() -> u8
+            = "0" { 0 }
+            / "1" { 1 }
+            / "2" { 2 }
+            / "3" { 3 }
+            / "4" { 4 }
+            / "5" { 5 }
+            / "6" { 6 }
+            / "7" { 7 }
+            / "8" { 8 }
+            / "9" { 9 }
+            / "a" { 10 }
+            / "b" { 11 }
+            / "c" { 12 }
+            / "d" { 13 }
+            / "e" { 14 }
+            / "f" { 15 }
     }
 }
 
 #[inline]
-pub fn parse(code: String) -> Result<Program, Box<dyn Error>> {
-    Ok(program_parser::program(code.as_str())?)
+pub fn parse(name: String) -> Result<Rc<RefCell<Program>>, Box<dyn Error>> {
+    Ok(enriched_parse(name)?)
 }

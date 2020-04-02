@@ -1,12 +1,13 @@
-pub use crate::enrich::Operation;
-pub use crate::enrich::Program;
-
+pub use crate::parse::{Method, Program};
+use std::cell::RefCell;
 use std::error::Error;
-use std::fs::File;
+use std::rc::Rc;
 
-mod enrich;
 mod parse;
 
-pub fn parse(name: String, code: String) -> Result<Program, Box<dyn Error>> {
-    enrich::enrich(name, parse::parse(code)?)
+pub fn parse(name: String) -> Result<Rc<RefCell<Program>>, Box<dyn Error>> {
+    parse::parse(name)
 }
+
+#[cfg(test)]
+mod test;
